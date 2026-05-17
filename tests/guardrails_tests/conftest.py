@@ -58,6 +58,32 @@ def _vcr_outcome_gate(request, vcr):
 def pytest_configure(config):
     _verbose_state.remember_pluginmanager(config)
     reset_vcr_diag_dir()
+    _flush_corrupted_presidio_cassettes()
+
+
+def _flush_corrupted_presidio_cassettes() -> None:
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        return
+    url = os.environ.get("CASSETTE_REDIS_URL")
+    if not url:
+        return
+    try:
+        import redis
+
+        client = redis.Redis.from_url(
+            url, socket_timeout=5, socket_connect_timeout=5
+        )
+        pattern = "litellm:vcr:cassette:tests/guardrails_tests/test_presidio_pii/*"
+        deleted = 0
+        for key in client.scan_iter(match=pattern, count=500):
+            client.delete(key)
+            deleted += 1
+        print(
+            f"[flush-hack] deleted {deleted} presidio cassettes from redis",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[flush-hack] failed: {exc}", flush=True)
 
 
 def pytest_runtest_logreport(report):
